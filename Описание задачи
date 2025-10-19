@@ -1,0 +1,184 @@
+1. Структура данных (реляционная модель)
+Для реализации дашбордов разработана нормализованная модель данных, включающая следующие таблицы:
+nomenclature
+Поле	Тип	Описание
+article_id	VARCHAR	Артикул товара
+category	VARCHAR	Категория товара
+cost	DECIMAL	Себестоимость товара
+clients
+Поле	Тип	Описание
+client_id	SERIAL	Уникальный ID клиента
+client_name	VARCHAR	Наименование юр. лица
+inn	VARCHAR	ИНН
+manager_id	INT	Ответственный менеджер (FK → employees.employee_id)
+employees
+Поле	Тип	Описание
+employee_id	SERIAL	ID сотрудника
+full_name	VARCHAR	ФИО
+role	ENUM('manager','leader')	Роль сотрудника
+team_id	INT	Команда (FK → teams.team_id)
+teams
+Поле	Тип	Описание
+team_id	SERIAL	ID команды
+team_name	VARCHAR	Название команды
+leader_id	INT	Руководитель (FK → employees.employee_id)
+orders
+Поле	Тип	Описание
+order_id	SERIAL	ID заказа
+client_id	INT	Клиент (FK → clients.client_id)
+article_id	VARCHAR	Артикул (FK → nomenclature.article_id)
+order_date	DATE	Дата заказа
+sum_amount	DECIMAL	Сумма по позиции
+margin	DECIMAL	Маржа по позиции
+sales
+Поле	Тип	Описание
+sale_id	SERIAL	ID реализации
+client_id	INT	Клиент
+article_id	VARCHAR	Артикул
+sale_date	DATE	Дата реализации
+sale_sum	DECIMAL	Сумма продажи
+sales_adjustments
+Поле	Тип	Описание
+adjustment_id	SERIAL	ID корректировки
+client_id	INT	Клиент
+article_id	VARCHAR	Артикул
+adjustment_date	DATE	Дата корректировки
+return_sum	DECIMAL	Сумма возврата
+plan_metrics
+Поле	Тип	Описание
+plan_id	SERIAL	ID записи
+manager_id	INT	Менеджер
+period	DATE	Период (месяц/год)
+plan_revenue	DECIMAL	Плановая выручка
+plan_margin	DECIMAL	Плановая маржа
+plan_avg_check	DECIMAL	Плановый средний чек
+2. SQL-запросы для расчета показателей
+Выручка (факт)
+
+SELECT 
+    e.employee_id,
+    e.full_name,
+    SUM(s.sale_sum - COALESCE(sa.return_sum, 0)) AS fact_revenue
+FROM sales s
+LEFT JOIN sales_adjustments sa 
+    ON s.client_id = sa.client_id AND s.article_id = sa.article_id
+JOIN clients c ON s.client_id = c.client_id
+JOIN employees e ON c.manager_id = e.employee_id
+GROUP BY e.employee_id, e.full_name;
+
+Выручка (план/факт)
+
+SELECT 
+    e.employee_id,
+    e.full_name,
+    pm.plan_revenue,
+    SUM(s.sale_sum - COALESCE(sa.return_sum, 0)) AS fact_revenue
+FROM employees e
+JOIN plan_metrics pm ON e.employee_id = pm.manager_id
+LEFT JOIN clients c ON e.employee_id = c.manager_id
+LEFT JOIN sales s ON s.client_id = c.client_id 
+LEFT JOIN sales_adjustments sa 
+    ON s.client_id = sa.client_id AND s.article_id = sa.article_id
+GROUP BY e.employee_id, e.full_name, pm.plan_revenue;
+
+Маржа (план/факт)
+
+SELECT 
+    e.employee_id,
+    e.full_name,
+    pm.plan_margin,
+    SUM(o.margin) AS fact_margin
+FROM employees e
+JOIN plan_metrics pm ON e.employee_id = pm.manager_id
+LEFT JOIN clients c ON e.employee_id = c.manager_id
+LEFT JOIN orders o ON o.client_id = c.client_id
+GROUP BY e.employee_id, e.full_name, pm.plan_margin;
+
+Средний чек по клиенту
+
+SELECT 
+    e.employee_id,
+    e.full_name,
+    c.client_name,
+    AVG(s.sale_sum) AS avg_check_fact,
+    pm.plan_avg_check
+FROM sales s
+JOIN clients c ON s.client_id = c.client_id
+JOIN employees e ON c.manager_id = e.employee_id
+LEFT JOIN plan_metrics pm ON e.employee_id = pm.manager_id
+GROUP BY e.employee_id, e.full_name, c.client_name, pm.plan_avg_check;
+
+Выручка по категории
+
+SELECT 
+    e.employee_id,
+    n.category,
+    SUM(s.sale_sum - COALESCE(sa.return_sum, 0)) AS revenue_by_category
+FROM sales s
+JOIN clients c ON s.client_id = c.client_id
+JOIN employees e ON c.manager_id = e.employee_id
+JOIN nomenclature n ON s.article_id = n.article_id
+LEFT JOIN sales_adjustments sa 
+    ON s.client_id = sa.client_id AND s.article_id = sa.article_id
+GROUP BY e.employee_id, n.category;
+
+Выручка по артикулу
+
+SELECT 
+    e.employee_id,
+    n.article_id,
+    n.category,
+    SUM(s.sale_sum - COALESCE(sa.return_sum, 0)) AS revenue_by_article
+FROM sales s
+JOIN clients c ON s.client_id = c.client_id
+JOIN employees e ON c.manager_id = e.employee_id
+JOIN nomenclature n ON s.article_id = n.article_id
+LEFT JOIN sales_adjustments sa 
+    ON s.client_id = sa.client_id AND s.article_id = sa.article_id
+GROUP BY e.employee_id, n.article_id, n.category;
+
+3. Дашборды и визуализация
+Дашборд менеджера
+
+Цель: личная эффективность и выполнение плана.
+Разделы:
+1. Основные KPI (карточки):
+   - Выручка (план / факт)
+2. Графики:
+   - Сумма продаж по датам (линейный график)
+   - Сумма продаж по категориям (pie chart)
+   - Сумма продаж по артикулу (pie chart)
+   - Сумма продаж по артикулу (pie chart)
+   - Сумма продаж по конкретному клиенту.
+Дашборд приведен как изображение (дашборд менеджеров). В примере дашборд для всех менеджеров, но чтобы сделать предустановленный дашборд для каждого работника нужно создать фильтр по работнику (поле full_name) и предустановить необходимое значение.
+3. Таблица клиентов:
+   - Клиент | Выручка | Средний чек | % от общего объема
+Фильтры: Период, Категория, Клиент
+
+Дашборд руководителя команды
+
+Цель: контроль эффективности команды и сравнение менеджеров.
+Разделы:
+1. Сводные KPI:
+   - Общая выручка команды (план / факт)
+   - Средняя маржа по команде
+   - Средний чек по клиентам
+2. Графики:
+   - Выполнение плана по каждому менеджеру (bar chart)
+   - Выручка по категориям (stacked bar)
+   - Топ артикулы по всей команде (table / heatmap)
+3. Срезы / фильтры:
+   - Период (месяц / квартал)
+   - Команда
+   - Категория товара
+
+4. Реализация в Apache Superset
+
+В Apache Superset каждый SQL-запрос создается как Dataset. На основе этих датасетов строятся визуализации:
+- KPI Cards для план/факт показателей;
+- Line Chart для динамики выручки;
+- Bar Chart для категорий и артикулов;
+- Pie Chart для структуры продаж;
+- Table для клиентов.
+Для интерактивности добавляются фильтры по дате, категории, команде и менеджеру.
+
